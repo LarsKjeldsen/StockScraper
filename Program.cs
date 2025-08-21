@@ -19,10 +19,6 @@ var configuration = new ConfigurationBuilder()
 string connectionString = configuration.GetConnectionString("DefaultConnection") 
     ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found in configuration.");
 
-// Connection string for Values database
-string valuesConnectionString = configuration.GetConnectionString("DefaultConnection") 
-    ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found in configuration.");
-
 // HttpClient for Yahoo Finance API calls
 using var httpClient = new HttpClient();
 httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
@@ -41,17 +37,25 @@ Console.WriteLine($"Found {stocks.Count} stocks in database");
 // Process each stock
 foreach (var stock in stocks)
 {
+    // only process ^OMXC25
+    if (stock.StockCode.Trim() != "^OMXC25")
+    {
+        ; // continue;
+    }
     try
     {
         Console.WriteLine($"\n--- Processing {stock.StockCode} ({stock.FriendlyName}) ---");
-        await ProcessStock(stock.StockCode.Trim(), stock.FriendlyName, httpClient, jsonOptions, valuesConnectionString);
-        
+        await ProcessStock(stock.StockCode.Trim(), stock.FriendlyName, httpClient, jsonOptions, connectionString);
+
         // Add a small delay between requests to be respectful to Yahoo Finance
         await Task.Delay(1000);
     }
     catch (Exception ex)
     {
+        // Write error in red
+        Console.ForegroundColor = ConsoleColor.Red;
         Console.WriteLine($"Error processing {stock.StockCode}: {ex.Message}");
+        Console.ResetColor();
     }
 }
 

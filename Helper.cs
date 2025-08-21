@@ -254,9 +254,9 @@ public static class Helper
         selectCommand.Parameters.AddWithValue("@StockCode", stockCode);
 
         var result = await selectCommand.ExecuteScalarAsync();
-        if (result != null)
+        if (result != null && result is int id)
         {
-            return (int)result;
+            return id;
         }
 
         // Insert new stock
@@ -271,7 +271,12 @@ public static class Helper
         insertCommand.Parameters.AddWithValue("@Currency", meta.Currency ?? (object)DBNull.Value);
         insertCommand.Parameters.AddWithValue("@ExchangeName", meta.ExchangeName ?? (object)DBNull.Value);
 
-        return (int)await insertCommand.ExecuteScalarAsync();
+        var insertedResult = await insertCommand.ExecuteScalarAsync();
+        if (insertedResult != null && insertedResult is int insertedId)
+        {
+            return insertedId;
+        }
+        throw new InvalidOperationException("Failed to insert or retrieve Stock Id.");
     }
 
     private static async Task BulkInsertStockValues(SqlConnection connection, List<StockValue> stockValues)
@@ -286,13 +291,18 @@ public static class Helper
             ON target.StockId = source.StockId AND target.Timestamp = source.Timestamp
             WHEN MATCHED THEN
                 UPDATE SET [Open] = source.[Open], High = source.High, Low = source.Low, 
-                          [Close] = source.[Close], Volume = source.Volume
+                           [Close] = source.[Close], Volume = source.Volume
             WHEN NOT MATCHED THEN
                 INSERT (StockId, Timestamp, [Open], High, Low, [Close], Volume)
                 VALUES (source.StockId, source.Timestamp, source.[Open], source.High, source.Low, source.[Close], source.Volume);";
 
         foreach (var stockValue in stockValues)
         {
+            // Skip if stockValue.Open is null
+            if (stockValue.Open == null && stockValue.High == null && stockValue.Low == null && stockValue.Close == null && stockValue.Volume == null)
+            {
+                continue;
+            }
             using var command = new SqlCommand(mergeQuery, connection);
             command.Parameters.AddWithValue("@StockId", stockValue.StockId);
             command.Parameters.AddWithValue("@Timestamp", stockValue.Timestamp);
