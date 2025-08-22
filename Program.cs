@@ -5,8 +5,8 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.IO;
 using System;
+using System.Net;
 using System.Net.Http;
-using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 
 // Build configuration from appsettings.json
@@ -37,15 +37,26 @@ Console.WriteLine($"Found {stocks.Count} stocks in database");
 // Process each stock
 foreach (var stock in stocks)
 {
-    // only process ^OMXC25
-    if (stock.StockCode.Trim() != "^OMXC25")
-    {
-        ; // continue;
-    }
+
     try
     {
-        Console.WriteLine($"\n--- Processing {stock.StockCode} ({stock.FriendlyName}) ---");
-        await ProcessStock(stock.StockCode.Trim(), stock.FriendlyName, httpClient, jsonOptions, connectionString);
+        // Find newest data in the database for this stock
+        
+        var latestData = await Helper.GetLatestStockDataFromDatabase(stock.StockCode, connectionString);
+
+        if ((latestData == null || latestData.Timestamp < DateTime.UtcNow.AddDays(-30)))
+        {
+            await ProcessStock(stock.StockCode.Trim(), stock.FriendlyName, httpClient, jsonOptions, connectionString, "1h", "2y");
+            await ProcessStock(stock.StockCode.Trim(), stock.FriendlyName, httpClient, jsonOptions, connectionString, "5m", "1mo");
+            await ProcessStock(stock.StockCode.Trim(), stock.FriendlyName, httpClient, jsonOptions, connectionString, "1m", "8d");
+        }
+        else if (latestData.Timestamp < DateTime.UtcNow.AddDays(-1))
+        {
+            await ProcessStock(stock.StockCode.Trim(), stock.FriendlyName, httpClient, jsonOptions, connectionString, "1m", "8d");
+        }
+        else
+            await ProcessStock(stock.StockCode.Trim(), stock.FriendlyName, httpClient, jsonOptions, connectionString, "1m", "1d");
+
 
         // Add a small delay between requests to be respectful to Yahoo Finance
         await Task.Delay(1000);
@@ -63,48 +74,35 @@ Console.WriteLine("\nProcessing complete!");
 
 
 // Method to process individual stock
-static async Task ProcessStock(string ticker, string friendlyName, HttpClient httpClient, JsonSerializerOptions jsonOptions, string valuesConnectionString)
+static async Task ProcessStock(string ticker, string friendlyName, HttpClient httpClient, JsonSerializerOptions jsonOptions, string valuesConnectionString, string interval, string range)
 {
-    string url = $"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1m&range=8d";
-    
-    var response = await httpClient.GetAsync(url);
-    if (!response.IsSuccessStatusCode)
+    string url = $"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval={interval}&range={range}";
+
+    // lightweight retry
+    const int maxAttempts = 3;
+    HttpResponseMessage? response = await Helper.PerformHttpRequestWithRetry(httpClient, url);
+
+    if (response == null || !response.IsSuccessStatusCode)
     {
-        Console.WriteLine($"Failed to load data for {ticker}: {response.StatusCode}");
+        Console.WriteLine($"Failed to load data for {ticker}: {response?.StatusCode}");
+        response?.Dispose();
         return;
     }
 
-    var jsonContent = await response.Content.ReadAsStringAsync();
-    Console.WriteLine($"Raw JSON response length: {jsonContent.Length}");
+    await using var stream = await response.Content.ReadAsStreamAsync();
 
-    // Parse the JSON response using our data model
-    var data = JsonSerializer.Deserialize<YahooFinanceResponse>(jsonContent, jsonOptions);
+    // Parse the JSON response using our data model (streaming)
+    var data = await JsonSerializer.DeserializeAsync<YahooFinanceResponse>(stream, jsonOptions);
 
-    if (data == null || data.Chart == null || data.Chart.Result == null || data.Chart.Result.Count == 0)
+    if (data?.Chart?.Result == null || data.Chart.Result.Count == 0)
     {
         Console.WriteLine($"No data found for {ticker}");
         return;
     }
     
     var result = data.Chart.Result[0];
-    Console.WriteLine($"Stock: {ticker}");
-    Console.WriteLine($"Current Price: {result.Meta.RegularMarketPrice}");
-    Console.WriteLine($"Previous Close: {result.Meta.PreviousClose}");
-
-    // Get the latest quote data for Open, High, Low
-    if (result.Indicators?.Quote?.Count > 0)
-    {
-        var quote = result.Indicators.Quote[0];
-        var latestIndex = quote.Open.Count - 1;
-        
-        if (latestIndex >= 0)
-        {
-            Console.WriteLine($"Open: {quote.Open[latestIndex]}");
-            Console.WriteLine($"High: {quote.High[latestIndex]}");
-            Console.WriteLine($"Low: {quote.Low[latestIndex]}");
-        }
-    }
 
     // Save to database
     await Helper.SaveStockDataToDatabase(ticker, friendlyName, result, valuesConnectionString);
 }
+

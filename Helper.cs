@@ -1,5 +1,7 @@
 ﻿using Microsoft.Data.SqlClient;
 using System.Text.Json.Serialization;
+using System.Data;
+using System.Net.Http;
 
 
 // Stock model for database
@@ -208,12 +210,20 @@ public static class Helper
         {
             using var connection = new SqlConnection(connectionString);
             await connection.OpenAsync();
+            using var tx = connection.BeginTransaction();
 
             // First, ensure the stock exists in the Stocks table
-            int stockId = await EnsureStockExists(connection, stockCode, friendlyName, chartResult.Meta);
+            int stockId = await EnsureStockExists(connection, tx, stockCode, friendlyName, chartResult.Meta);
 
-            // Prepare data for bulk insert
-            var stockValues = new List<StockValue>();
+            // Prepare data table for bulk insert
+            var table = new DataTable();
+            table.Columns.Add("StockId", typeof(int));
+            table.Columns.Add("Timestamp", typeof(DateTime));
+            table.Columns.Add("Open", typeof(decimal));
+            table.Columns.Add("High", typeof(decimal));
+            table.Columns.Add("Low", typeof(decimal));
+            table.Columns.Add("Close", typeof(decimal));
+            table.Columns.Add("Volume", typeof(long));
 
             if (chartResult.Timestamp != null && chartResult.Indicators?.Quote?.Count > 0)
             {
@@ -221,25 +231,70 @@ public static class Helper
 
                 for (int i = 0; i < chartResult.Timestamp.Count; i++)
                 {
-                    var timestamp = DateTimeOffset.FromUnixTimeSeconds(chartResult.Timestamp[i]).DateTime;
+                    var timestampUtc = DateTimeOffset.FromUnixTimeSeconds(chartResult.Timestamp[i]).UtcDateTime;
 
-                    stockValues.Add(new StockValue
+                    var open = i < quote.Open.Count ? quote.Open[i] : null;
+                    var high = i < quote.High.Count ? quote.High[i] : null;
+                    var low = i < quote.Low.Count ? quote.Low[i] : null;
+                    var close = i < quote.Close.Count ? quote.Close[i] : null;
+                    var volume = i < quote.Volume.Count ? quote.Volume[i] : null;
+
+                    if (open == null && high == null && low == null && close == null && volume == null)
                     {
-                        StockId = stockId,
-                        Timestamp = timestamp,
-                        Open = i < quote.Open.Count ? quote.Open[i] : null,
-                        High = i < quote.High.Count ? quote.High[i] : null,
-                        Low = i < quote.Low.Count ? quote.Low[i] : null,
-                        Close = i < quote.Close.Count ? quote.Close[i] : null,
-                        Volume = i < quote.Volume.Count ? quote.Volume[i] : null
-                    });
+                        continue; // skip empty row
+                    }
+
+                    var row = table.NewRow();
+                    row["StockId"] = stockId;
+                    row["Timestamp"] = timestampUtc;
+                    row["Open"] = (object?)open ?? DBNull.Value;
+                    row["High"] = (object?)high ?? DBNull.Value;
+                    row["Low"] = (object?)low ?? DBNull.Value;
+                    row["Close"] = (object?)close ?? DBNull.Value;
+                    row["Volume"] = (object?)volume ?? DBNull.Value;
+                    table.Rows.Add(row);
                 }
             }
 
-            // Bulk insert stock values
-            await BulkInsertStockValues(connection, stockValues);
+            if (table.Rows.Count > 0)
+            {
+                // stage into temp table
+                using (var createCmd = new SqlCommand(@"CREATE TABLE #TmpStockValues(
+                        StockId INT NOT NULL,
+                        Timestamp DATETIME2(7) NOT NULL,
+                        [Open] DECIMAL(18,4) NULL,
+                        High DECIMAL(18,4) NULL,
+                        Low DECIMAL(18,4) NULL,
+                        [Close] DECIMAL(18,4) NULL,
+                        Volume BIGINT NULL
+                    )", connection, tx))
+                {
+                    await createCmd.ExecuteNonQueryAsync();
+                }
 
-            Console.WriteLine($"Saved {stockValues.Count} data points for {stockCode}");
+                using (var bulk = new SqlBulkCopy(connection, SqlBulkCopyOptions.Default, tx))
+                {
+                    bulk.DestinationTableName = "#TmpStockValues";
+                    await bulk.WriteToServerAsync(table);
+                }
+
+                // merge into target
+                using (var mergeCmd = new SqlCommand(@"
+                    MERGE dbo.StockValues AS target
+                    USING #TmpStockValues AS source
+                    ON target.StockId = source.StockId AND target.Timestamp = source.Timestamp
+                    WHEN MATCHED THEN
+                        UPDATE SET [Open] = source.[Open], High = source.High, Low = source.Low, [Close] = source.[Close], Volume = source.Volume
+                    WHEN NOT MATCHED THEN
+                        INSERT (StockId, Timestamp, [Open], High, Low, [Close], Volume)
+                        VALUES (source.StockId, source.Timestamp, source.[Open], source.High, source.Low, source.[Close], source.Volume);", connection, tx))
+                {
+                    await mergeCmd.ExecuteNonQueryAsync();
+                }
+            }
+
+            await tx.CommitAsync();
+            Console.WriteLine($"Saved {table.Rows.Count} data points for {stockCode}");
         }
         catch (Exception ex)
         {
@@ -247,10 +302,10 @@ public static class Helper
         }
     }
 
-    private static async Task<int> EnsureStockExists(SqlConnection connection, string stockCode, string friendlyName, Meta meta)
+    private static async Task<int> EnsureStockExists(SqlConnection connection, SqlTransaction tx, string stockCode, string friendlyName, Meta meta)
     {
         string selectQuery = "SELECT Id FROM dbo.Stocks WHERE StockCode = @StockCode";
-        using var selectCommand = new SqlCommand(selectQuery, connection);
+        using var selectCommand = new SqlCommand(selectQuery, connection, tx);
         selectCommand.Parameters.AddWithValue("@StockCode", stockCode);
 
         var result = await selectCommand.ExecuteScalarAsync();
@@ -265,11 +320,11 @@ public static class Helper
             OUTPUT INSERTED.Id
             VALUES (@StockCode, @FriendlyName, @Currency, @ExchangeName, GETUTCDATE())";
 
-        using var insertCommand = new SqlCommand(insertQuery, connection);
+        using var insertCommand = new SqlCommand(insertQuery, connection, tx);
         insertCommand.Parameters.AddWithValue("@StockCode", stockCode);
-        insertCommand.Parameters.AddWithValue("@FriendlyName", friendlyName ?? (object)DBNull.Value);
-        insertCommand.Parameters.AddWithValue("@Currency", meta.Currency ?? (object)DBNull.Value);
-        insertCommand.Parameters.AddWithValue("@ExchangeName", meta.ExchangeName ?? (object)DBNull.Value);
+        insertCommand.Parameters.AddWithValue("@FriendlyName", (object?)friendlyName ?? DBNull.Value);
+        insertCommand.Parameters.AddWithValue("@Currency", (object?)meta.Currency ?? DBNull.Value);
+        insertCommand.Parameters.AddWithValue("@ExchangeName", (object?)meta.ExchangeName ?? DBNull.Value);
 
         var insertedResult = await insertCommand.ExecuteScalarAsync();
         if (insertedResult != null && insertedResult is int insertedId)
@@ -279,41 +334,68 @@ public static class Helper
         throw new InvalidOperationException("Failed to insert or retrieve Stock Id.");
     }
 
-    private static async Task BulkInsertStockValues(SqlConnection connection, List<StockValue> stockValues)
+    public static async Task<StockValue?>GetLatestStockDataFromDatabase(string ticker, string valuesConnectionString)
     {
-        if (stockValues.Count == 0) return;
-
-        // For SQL Server, we need to use MERGE instead of ON DUPLICATE KEY UPDATE
-        string mergeQuery = @"
-            MERGE dbo.StockValues AS target
-            USING (VALUES (@StockId, @Timestamp, @Open, @High, @Low, @Close, @Volume)) 
-                AS source (StockId, Timestamp, [Open], High, Low, [Close], Volume)
-            ON target.StockId = source.StockId AND target.Timestamp = source.Timestamp
-            WHEN MATCHED THEN
-                UPDATE SET [Open] = source.[Open], High = source.High, Low = source.Low, 
-                           [Close] = source.[Close], Volume = source.Volume
-            WHEN NOT MATCHED THEN
-                INSERT (StockId, Timestamp, [Open], High, Low, [Close], Volume)
-                VALUES (source.StockId, source.Timestamp, source.[Open], source.High, source.Low, source.[Close], source.Volume);";
-
-        foreach (var stockValue in stockValues)
+        // Find newest data in the database for this stock
+        using var connection = new SqlConnection(valuesConnectionString);
+        await connection.OpenAsync();
+        string query = @"
+            SELECT TOP 1 *
+            FROM dbo.StockValues
+            WHERE StockId = (SELECT Id FROM dbo.Stocks WHERE StockCode = @StockCode)
+            ORDER BY Timestamp DESC";
+        using var command = new SqlCommand(query, connection);
+        command.Parameters.AddWithValue("@StockCode", ticker);
+        using var reader = await command.ExecuteReaderAsync();
+        if (await reader.ReadAsync())
         {
-            // Skip if stockValue.Open is null
-            if (stockValue.Open == null && stockValue.High == null && stockValue.Low == null && stockValue.Close == null && stockValue.Volume == null)
+            return new StockValue
             {
-                continue;
-            }
-            using var command = new SqlCommand(mergeQuery, connection);
-            command.Parameters.AddWithValue("@StockId", stockValue.StockId);
-            command.Parameters.AddWithValue("@Timestamp", stockValue.Timestamp);
-            command.Parameters.AddWithValue("@Open", stockValue.Open ?? (object)DBNull.Value);
-            command.Parameters.AddWithValue("@High", stockValue.High ?? (object)DBNull.Value);
-            command.Parameters.AddWithValue("@Low", stockValue.Low ?? (object)DBNull.Value);
-            command.Parameters.AddWithValue("@Close", stockValue.Close ?? (object)DBNull.Value);
-            command.Parameters.AddWithValue("@Volume", stockValue.Volume ?? (object)DBNull.Value);
-
-            await command.ExecuteNonQueryAsync();
+                StockId = reader.GetInt32(reader.GetOrdinal("StockId")),
+                Timestamp = reader.GetDateTime(reader.GetOrdinal("Timestamp")),
+                Open = reader.IsDBNull(reader.GetOrdinal("Open")) ? null : reader.GetDecimal(reader.GetOrdinal("Open")),
+                High = reader.IsDBNull(reader.GetOrdinal("High")) ? null : reader.GetDecimal(reader.GetOrdinal("High")),
+                Low = reader.IsDBNull(reader.GetOrdinal("Low")) ? null : reader.GetDecimal(reader.GetOrdinal("Low")),
+                Close = reader.IsDBNull(reader.GetOrdinal("Close")) ? null : reader.GetDecimal(reader.GetOrdinal("Close")),
+                Volume = reader.IsDBNull(reader.GetOrdinal("Volume")) ? null : reader.GetInt64(reader.GetOrdinal("Volume"))
+            };
         }
+        return null;
+    }
+
+    public static async Task<HttpResponseMessage?> PerformHttpRequestWithRetry(HttpClient httpClient, string url, int maxAttempts = 3)
+    {
+        HttpResponseMessage? response = null;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get, url);
+                response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+                if (response.IsSuccessStatusCode)
+                {
+                    break;
+                }
+                Console.WriteLine($"Failed to load data (attempt {attempt}/{maxAttempts}): {response.StatusCode}");
+            }
+            catch (HttpRequestException hre)
+            {
+                Console.WriteLine($"HTTP error (attempt {attempt}/{maxAttempts}): {hre.Message}");
+            }
+
+            if (attempt < maxAttempts)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(250 * attempt * attempt));
+            }
+        }
+
+        if (response == null || !response.IsSuccessStatusCode)
+        {
+            Console.WriteLine($"Failed to load data: {response?.StatusCode}");
+            response?.Dispose();
+        }
+
+        return response;
     }
 }
 
