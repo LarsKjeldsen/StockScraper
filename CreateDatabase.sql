@@ -16,6 +16,7 @@ CREATE TABLE [dbo].[Stocks](
 	[ExchangeName] [nvarchar](100) NULL,
 	[CreatedDate] [datetime2](7) NULL,
 	[UpdatedDate] [datetime2](7) NULL,
+	[NumberOfStocksOwned] [int] NULL,
 PRIMARY KEY CLUSTERED 
 (
 	[Id] ASC

@@ -4,11 +4,17 @@ using System.Data;
 using System.Net.Http;
 
 
-// Stock model for database
+// Updated Stock model to match the database schema
 public class Stock
 {
-    public string StockCode { get; set; } = string.Empty;
+    public int Id { get; set; } // Primary key
+    public string StockCode { get; set; } = string.Empty; // Unique non-clustered index
     public string FriendlyName { get; set; } = string.Empty;
+    public string? Currency { get; set; } // Nullable
+    public string? ExchangeName { get; set; } // Nullable
+    public DateTime? CreatedDate { get; set; } // Nullable, default to GETUTCDATE()
+    public DateTime? UpdatedDate { get; set; } // Nullable, default to GETUTCDATE()
+    public int? NumberOfStocksOwned { get; set; } // Nullable
 }
 
 // Helper class for stock values
@@ -314,11 +320,11 @@ public static class Helper
             return id;
         }
 
-        // Insert new stock
+        // Insert new stock with updated schema
         string insertQuery = @"
-            INSERT INTO dbo.Stocks (StockCode, FriendlyName, Currency, ExchangeName, UpdatedDate)
+            INSERT INTO dbo.Stocks (StockCode, FriendlyName, Currency, ExchangeName, CreatedDate, UpdatedDate, NumberOfStocksOwned)
             OUTPUT INSERTED.Id
-            VALUES (@StockCode, @FriendlyName, @Currency, @ExchangeName, GETUTCDATE())";
+            VALUES (@StockCode, @FriendlyName, @Currency, @ExchangeName, GETUTCDATE(), GETUTCDATE(), NULL)";
 
         using var insertCommand = new SqlCommand(insertQuery, connection, tx);
         insertCommand.Parameters.AddWithValue("@StockCode", stockCode);
