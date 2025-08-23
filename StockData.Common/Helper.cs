@@ -1,8 +1,10 @@
-﻿using Microsoft.Data.SqlClient;
+using Microsoft.Data.SqlClient;
 using System.Text.Json.Serialization;
 using System.Data;
 using System.Net.Http;
+using System.IO;
 
+namespace StockData.Common;
 
 // Updated Stock model to match the database schema
 public class Stock
@@ -183,11 +185,34 @@ public class AdjustedClose
     public List<decimal?> AdjClose { get; set; } = new();
 }
 
-
 public static class Helper
 {
-    public static async Task<List<Stock>> GetStocksFromDatabase(string connectionString)
+    private static string? _connectionString;
+
+    // Method to get the connection string
+    public static string GetConnectionString()
     {
+        if (_connectionString == null)
+        {
+            var connectionStringFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "connectionString.txt");
+            if (!File.Exists(connectionStringFilePath))
+            {
+                throw new FileNotFoundException("Connection string file not found.", connectionStringFilePath);
+            }
+
+            _connectionString = File.ReadAllText(connectionStringFilePath).Trim();
+            if (string.IsNullOrEmpty(_connectionString))
+            {
+                throw new InvalidOperationException("Connection string is empty.");
+            }
+        }
+
+        return _connectionString;
+    }
+
+    public static async Task<List<Stock>> GetStocksFromDatabase()
+    {
+        string connectionString = GetConnectionString();
         var stocks = new List<Stock>();
 
         using var connection = new SqlConnection(connectionString);
@@ -210,8 +235,45 @@ public static class Helper
         return stocks;
     }
 
-    public static async Task SaveStockDataToDatabase(string stockCode, string friendlyName, ChartResult chartResult, string connectionString)
+    public static async Task<List<StockValue>> GetAllStockValuesFromDatabase(string stockCode)
     {
+        string connectionString = GetConnectionString();
+        var stockValues = new List<StockValue>();
+
+        using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync();
+
+        string query = @"
+            SELECT sv.StockId, sv.Timestamp, sv.[Open], sv.High, sv.Low, sv.[Close], sv.Volume
+            FROM dbo.StockValues sv
+            INNER JOIN dbo.Stocks s ON sv.StockId = s.Id
+            WHERE s.StockCode = @StockCode
+            ORDER BY sv.Timestamp";
+
+        using var command = new SqlCommand(query, connection);
+        command.Parameters.AddWithValue("@StockCode", stockCode);
+        using var reader = await command.ExecuteReaderAsync();
+
+        while (await reader.ReadAsync())
+        {
+            stockValues.Add(new StockValue
+            {
+                StockId = reader.GetInt32("StockId"),
+                Timestamp = reader.GetDateTime("Timestamp"),
+                Open = reader.IsDBNull("Open") ? null : reader.GetDecimal("Open"),
+                High = reader.IsDBNull("High") ? null : reader.GetDecimal("High"),
+                Low = reader.IsDBNull("Low") ? null : reader.GetDecimal("Low"),
+                Close = reader.IsDBNull("Close") ? null : reader.GetDecimal("Close"),
+                Volume = reader.IsDBNull("Volume") ? null : reader.GetInt64("Volume")
+            });
+        }
+
+        return stockValues;
+    }
+
+    public static async Task SaveStockDataToDatabase(string stockCode, string friendlyName, ChartResult chartResult)
+    {
+        string connectionString = GetConnectionString();
         try
         {
             using var connection = new SqlConnection(connectionString);
@@ -340,10 +402,12 @@ public static class Helper
         throw new InvalidOperationException("Failed to insert or retrieve Stock Id.");
     }
 
-    public static async Task<StockValue?>GetLatestStockDataFromDatabase(string ticker, string valuesConnectionString)
+    public static async Task<StockValue?> GetLatestStockDataFromDatabase(string ticker)
     {
+        string connectionString = GetConnectionString();
+
         // Find newest data in the database for this stock
-        using var connection = new SqlConnection(valuesConnectionString);
+        using var connection = new SqlConnection(connectionString);
         await connection.OpenAsync();
         string query = @"
             SELECT TOP 1 *
@@ -404,4 +468,3 @@ public static class Helper
         return response;
     }
 }
-
