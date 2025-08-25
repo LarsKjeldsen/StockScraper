@@ -10,6 +10,17 @@ namespace AktieAnalyzer
         public decimal Amount { get; set; } = 0;
         public int NumberOfTransactions { get; set; } = 0; // Added property for number of transactions
         public decimal TotalKurtage { get; internal set; }
+
+        // Added property to store daily results
+        public List<DailyResult> DailyResults { get; set; } = new List<DailyResult>();
+    }
+
+    public class DailyResult
+    {
+        public DateTime Date { get; set; }
+        public decimal ProfitOrLoss { get; set; }
+        public decimal StartAmount { get; set; }
+        public decimal EndAmount { get; set; }
     }
 
     public class Analyzer
@@ -95,6 +106,7 @@ namespace AktieAnalyzer
             // Starting amount
             var currentAmount = _startAmount;
             int transactionCount = 0; // Counter for transactions
+            var dailyResults = new List<DailyResult>(); // List to store daily results
 
             foreach (var group in groupedByDate)
             {
@@ -115,7 +127,17 @@ namespace AktieAnalyzer
 
                     // Calculate the number of shares bought and their value at sell price
                     var sharesBought = currentAmount / buyPrice.Value;
-                    currentAmount = sharesBought * sellPrice.Value; // Update current amount after selling
+                    var endAmount = sharesBought * sellPrice.Value; // Update current amount after selling
+
+                    dailyResults.Add(new DailyResult
+                    {
+                        Date = group.Key,
+                        ProfitOrLoss = endAmount - currentAmount,
+                        StartAmount = currentAmount,
+                        EndAmount = endAmount
+                    });
+
+                    currentAmount = endAmount;
                     transactionCount += 2; // Increment transaction count (one sell and one buy)
                 }
             }
@@ -126,7 +148,8 @@ namespace AktieAnalyzer
                 {
                     Recommendation = "HOLD",
                     Reason = "No sufficient data for 8:00 and 14:00 analysis",
-                    NumberOfTransactions = transactionCount // Include transaction count
+                    NumberOfTransactions = transactionCount, // Include transaction count
+                    DailyResults = dailyResults
                 };
             }
 
@@ -135,7 +158,6 @@ namespace AktieAnalyzer
             // Kurtage is 25 DKK / transaction + 0.05% of the transaction value
             var kurtagePerTransaction = 25 + (0.0005m * _startAmount);
             var totalKurtage = kurtagePerTransaction * transactionCount * 2; // Buy and sell for each transaction
-//            totalProfit -= totalKurtage;
 
             return new AnalysisResult
             {
@@ -143,7 +165,8 @@ namespace AktieAnalyzer
                 Reason = $"Total profit: {totalProfit:F2}, Final amount: {currentAmount:F2}",
                 Amount = totalProfit, // Final profit in dollars
                 NumberOfTransactions = transactionCount, // Include transaction count
-                TotalKurtage = totalKurtage // Include total kurtage cost
+                TotalKurtage = totalKurtage, // Include total kurtage cost
+                DailyResults = dailyResults // Include daily results
             };
         }
     }

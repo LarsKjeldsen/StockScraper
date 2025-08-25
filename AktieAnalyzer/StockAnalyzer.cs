@@ -5,10 +5,16 @@ namespace AktieAnalyzer
 {
     public partial class StockAnalyzer : Form
     {
+        private ListView listViewDailyResults;
+        private Dictionary<string, AnalysisResult> analysisResults; // Store analysis results by stock code
+
         public StockAnalyzer()
         {
             InitializeComponent();
             SetupListViewColumns();
+            InitializeDailyResultsListView(); // Ensure the daily results ListView is initialized
+            analysisResults = new Dictionary<string, AnalysisResult>(); // Initialize the dictionary
+            textBoxStartAmount.Text = "10.000";
         }
 
         private void SetupListViewColumns()
@@ -25,11 +31,34 @@ namespace AktieAnalyzer
             listViewResults.Columns.Add("Reason", 200, HorizontalAlignment.Left);
         }
 
+        private void InitializeDailyResultsListView()
+        {
+            if (listViewDailyResults == null)
+            {
+                listViewDailyResults = new ListView
+                {
+                    View = View.Details,
+                    FullRowSelect = true,
+                    GridLines = true,
+                    Dock = DockStyle.Bottom,
+                    Height = 200
+                };
+
+                listViewDailyResults.Columns.Add("Date", 100, HorizontalAlignment.Left);
+                listViewDailyResults.Columns.Add("Start Amount", 120, HorizontalAlignment.Right);
+                listViewDailyResults.Columns.Add("End Amount", 120, HorizontalAlignment.Right);
+                listViewDailyResults.Columns.Add("Profit/Loss", 120, HorizontalAlignment.Right);
+
+                Controls.Add(listViewDailyResults);
+            }
+        }
+
         private async void StockAnalyzer_Load(object sender, EventArgs e)
         {
             listViewResults.Items.Clear();
             textBoxEndAmount.Text = "";
             textBoxPL.Text = "";
+            analysisResults.Clear(); // Clear previous analysis results
 
             // Parse the start amount from the textbox
             if (!decimal.TryParse(textBoxStartAmount.Text, out decimal startAmount))
@@ -61,6 +90,9 @@ namespace AktieAnalyzer
                     var analyzer = new Analyzer(stock.StockCode, stock.FriendlyName, stockValues, timeRange, startAmount);
                     var analysisResult = analyzer.AnalyzeBuyAt8SellAt14();
 
+                    // Store the analysis result for later use
+                    analysisResults[stock.StockCode] = analysisResult;
+
                     // Display analysis result in the UI
                     var listViewItem = new ListViewItem(new[]
                     {
@@ -80,6 +112,42 @@ namespace AktieAnalyzer
                 textBoxEndAmount.Text = totalAmount.ToString("N0"); // Display total amount as decimal with thousand separators
                 textBoxPL.Text = (totalAmount - startAmount).ToString("N0"); // Display profit/loss as decimal with thousand separators
                 textBoxKurtage.Text = totalKurtage.ToString("N0"); // Display kurtage as decimal with thousand separators
+            }
+        }
+
+        private void DisplayDailyResults(List<DailyResult> dailyResults)
+        {
+            foreach (var dailyResult in dailyResults)
+            {
+                var listViewItem = new ListViewItem(new[]
+                {
+                    dailyResult.Date.ToShortDateString(),
+                    dailyResult.StartAmount.ToString("N0"),
+                    dailyResult.EndAmount.ToString("N0"),
+                    dailyResult.ProfitOrLoss.ToString("N0")
+                });
+                listViewDailyResults.Items.Add(listViewItem);
+            }
+        }
+
+        private async void listViewResults_ItemActivate(object sender, EventArgs e)
+        {
+            if (listViewResults.SelectedItems.Count > 0)
+            {
+                var selectedItem = listViewResults.SelectedItems[0];
+                var stockCode = selectedItem.SubItems[0].Text;
+
+                // Use the already calculated analysis result instead of recalculating
+                if (analysisResults.TryGetValue(stockCode, out var analysisResult))
+                {
+                    // Open the graph form with the existing analysis result
+                    var graphForm = new DailyResultGraphForm(analysisResult.DailyResults);
+                    graphForm.ShowDialog();
+                }
+                else
+                {
+                    MessageBox.Show("Analysis result not found for the selected stock.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
         }
     }

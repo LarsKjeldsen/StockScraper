@@ -50,6 +50,7 @@
             listViewResults.TabIndex = 0;
             listViewResults.UseCompatibleStateImageBehavior = false;
             listViewResults.View = View.Details;
+            listViewResults.Click += listViewResults_ItemActivate;
             // 
             // ButtomLoadData
             // 
