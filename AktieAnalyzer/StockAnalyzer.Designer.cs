@@ -33,7 +33,7 @@
             textBoxStartAmount = new TextBox();
             textBoxEndAmount = new TextBox();
             textBoxPL = new TextBox();
-            textBox4 = new TextBox();
+            textBoxKurtage = new TextBox();
             label1 = new Label();
             label2 = new Label();
             label3 = new Label();
@@ -82,12 +82,12 @@
             textBoxPL.Size = new Size(100, 23);
             textBoxPL.TabIndex = 4;
             // 
-            // textBox4
+            // textBoxKurtage
             // 
-            textBox4.Location = new Point(877, 99);
-            textBox4.Name = "textBox4";
-            textBox4.Size = new Size(100, 23);
-            textBox4.TabIndex = 5;
+            textBoxKurtage.Location = new Point(877, 99);
+            textBoxKurtage.Name = "textBoxKurtage";
+            textBoxKurtage.Size = new Size(100, 23);
+            textBoxKurtage.TabIndex = 5;
             // 
             // label1
             // 
@@ -121,9 +121,9 @@
             label4.AutoSize = true;
             label4.Location = new Point(791, 107);
             label4.Name = "label4";
-            label4.Size = new Size(38, 15);
+            label4.Size = new Size(48, 15);
             label4.TabIndex = 9;
-            label4.Text = "label4";
+            label4.Text = "Kurtage";
             // 
             // StockAnalyzer
             // 
@@ -134,7 +134,7 @@
             Controls.Add(label3);
             Controls.Add(label2);
             Controls.Add(label1);
-            Controls.Add(textBox4);
+            Controls.Add(textBoxKurtage);
             Controls.Add(textBoxPL);
             Controls.Add(textBoxEndAmount);
             Controls.Add(textBoxStartAmount);
@@ -158,7 +158,7 @@
         private TextBox textBoxStartAmount;
         private TextBox textBoxEndAmount;
         private TextBox textBoxPL;
-        private TextBox textBox4;
+        private TextBox textBoxKurtage;
         private Label label1;
         private Label label2;
         private Label label3;

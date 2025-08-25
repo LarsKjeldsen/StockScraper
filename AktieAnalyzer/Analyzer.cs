@@ -1,4 +1,5 @@
 using StockData.Common;
+using System.Runtime.InteropServices;
 
 namespace AktieAnalyzer
 {
@@ -8,6 +9,7 @@ namespace AktieAnalyzer
         public string Reason { get; set; } = string.Empty;
         public decimal Amount { get; set; } = 0;
         public int NumberOfTransactions { get; set; } = 0; // Added property for number of transactions
+        public decimal TotalKurtage { get; internal set; }
     }
 
     public class Analyzer
@@ -16,13 +18,15 @@ namespace AktieAnalyzer
         private readonly string _friendlyName;
         private readonly List<StockValue> _stockValues;
         private readonly TimeSpan _timeRange;
+        private readonly decimal _startAmount;
 
-        public Analyzer(string stockCode, string friendlyName, List<StockValue> stockValues, TimeSpan timeRange)
+        public Analyzer(string stockCode, string friendlyName, List<StockValue> stockValues, TimeSpan timeRange, decimal startAmount)
         {
             _stockCode = stockCode;
             _friendlyName = friendlyName;
             _stockValues = stockValues;
             _timeRange = timeRange;
+            _startAmount = startAmount;
         }
 
         public AnalysisResult Analyze()
@@ -88,28 +92,31 @@ namespace AktieAnalyzer
             // Group stock values by date
             var groupedByDate = filteredStockValues.GroupBy(sv => sv.Timestamp.Date).ToList();
 
-            // Starting amount in dollars
-            var currentAmount = 100m;
+            // Starting amount
+            var currentAmount = _startAmount;
             int transactionCount = 0; // Counter for transactions
 
             foreach (var group in groupedByDate)
             {
-                var buyPrice = group
+                var sellPrice = group
                     .Where(sv => sv.Timestamp.TimeOfDay >= new TimeSpan(8, 0, 0))
                     .OrderBy(sv => sv.Timestamp.TimeOfDay)
-                    .FirstOrDefault()?.Close;
+                    .FirstOrDefault()?.Open;
 
-                var sellPrice = group
+                var buyPrice = group
                     .Where(sv => sv.Timestamp.TimeOfDay >= new TimeSpan(14, 0, 0))
                     .OrderBy(sv => sv.Timestamp.TimeOfDay)
                     .FirstOrDefault()?.Close;
 
                 if (buyPrice.HasValue && sellPrice.HasValue)
                 {
+                    var PL = sellPrice.Value - buyPrice.Value;
+                    var newHolding = currentAmount * PL;
+
                     // Calculate the number of shares bought and their value at sell price
                     var sharesBought = currentAmount / buyPrice.Value;
                     currentAmount = sharesBought * sellPrice.Value; // Update current amount after selling
-                    transactionCount++; // Increment transaction count
+                    transactionCount += 2; // Increment transaction count (one sell and one buy)
                 }
             }
 
@@ -123,14 +130,20 @@ namespace AktieAnalyzer
                 };
             }
 
-            var totalProfit = currentAmount - 100m;
+            var totalProfit = currentAmount - _startAmount;
+
+            // Kurtage is 25 DKK / transaction + 0.05% of the transaction value
+            var kurtagePerTransaction = 25 + (0.0005m * _startAmount);
+            var totalKurtage = kurtagePerTransaction * transactionCount * 2; // Buy and sell for each transaction
+//            totalProfit -= totalKurtage;
 
             return new AnalysisResult
             {
                 Recommendation = totalProfit > 0 ? "Win" : "Loss",
                 Reason = $"Total profit: {totalProfit:F2}, Final amount: {currentAmount:F2}",
                 Amount = totalProfit, // Final profit in dollars
-                NumberOfTransactions = transactionCount // Include transaction count
+                NumberOfTransactions = transactionCount, // Include transaction count
+                TotalKurtage = totalKurtage // Include total kurtage cost
             };
         }
     }

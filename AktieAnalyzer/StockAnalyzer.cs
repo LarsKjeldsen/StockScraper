@@ -1,4 +1,5 @@
 using StockData.Common;
+using System.Numerics;
 
 namespace AktieAnalyzer
 {
@@ -12,10 +13,6 @@ namespace AktieAnalyzer
 
         private void SetupListViewColumns()
         {
-            listViewResults.Clear();
-            textBoxStartAmount.Text = "";
-            textBoxEndAmount.Text = "";
-            textBoxPL.Text = "";
             // Set the view to show details
             listViewResults.View = View.Details;
 
@@ -30,22 +27,38 @@ namespace AktieAnalyzer
 
         private async void StockAnalyzer_Load(object sender, EventArgs e)
         {
+            listViewResults.Items.Clear();
+            textBoxEndAmount.Text = "";
+            textBoxPL.Text = "";
+
+            // Parse the start amount from the textbox
+            if (!decimal.TryParse(textBoxStartAmount.Text, out decimal startAmount))
+            {
+                MessageBox.Show("Invalid start amount. Please enter a valid number.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            textBoxStartAmount.Text = startAmount.ToString("N0");
+
+            decimal totalAmount = startAmount;
+            decimal totalKurtage = 0.00m;
+
             // Read all stock values for all stocks into memory
             var stocks = await Helper.GetStocksFromDatabase();
-            decimal totalAmount = 100.00m; // Starting amount for calculations
 
             foreach (var stock in stocks)
             {
                 if (stock.StockCode == @"^OMXC25")
-                     continue;
+                    continue;
+
                 var stockValues = await Helper.GetAllStockValuesFromDatabase(stock.StockCode);
 
                 if (stockValues.Count > 0)
                 {
-                    // Specify the time range for analysis (e.g., last 30 days)
-                    var timeRange = TimeSpan.FromDays(30);
+                    // Specify the time range for analysis (e.g., last 1 year)
+                    var timeRange = TimeSpan.FromDays(365);
 
-                    var analyzer = new Analyzer(stock.StockCode, stock.FriendlyName, stockValues, timeRange);
+                    var analyzer = new Analyzer(stock.StockCode, stock.FriendlyName, stockValues, timeRange, startAmount);
                     var analysisResult = analyzer.AnalyzeBuyAt8SellAt14();
 
                     // Display analysis result in the UI
@@ -53,18 +66,20 @@ namespace AktieAnalyzer
                     {
                         stock.StockCode,
                         stock.FriendlyName,
-                        analysisResult.Amount.ToString("F2"),
-                        analysisResult.NumberOfTransactions.ToString(), // Display number of transactions
+                        analysisResult.Amount.ToString("N0"), // Display amount as decimal with thousand separators
+                        analysisResult.NumberOfTransactions.ToString("N0"), // Display number of transactions as integer with thousand separators
                         analysisResult.Recommendation,
                         analysisResult.Reason
                     });
                     totalAmount += analysisResult.Amount;
+                    totalKurtage += analysisResult.TotalKurtage;
                     listViewResults.Items.Add(listViewItem);
                 }
-                // Sum up Amount
-                textBoxStartAmount.Text = "100.00";
-                textBoxEndAmount.Text = totalAmount.ToString("F2");
-                textBoxPL.Text = (totalAmount - 100.00m).ToString("F2");
+
+                // Update summary fields
+                textBoxEndAmount.Text = totalAmount.ToString("N0"); // Display total amount as decimal with thousand separators
+                textBoxPL.Text = (totalAmount - startAmount).ToString("N0"); // Display profit/loss as decimal with thousand separators
+                textBoxKurtage.Text = totalKurtage.ToString("N0"); // Display kurtage as decimal with thousand separators
             }
         }
     }
