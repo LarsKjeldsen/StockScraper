@@ -130,7 +130,7 @@ namespace AktieAnalyzer
             }
         }
 
-        private async void listViewResults_ItemActivate(object sender, EventArgs e)
+        private void listViewResults_ItemActivate(object sender, EventArgs e)
         {
             if (listViewResults.SelectedItems.Count > 0)
             {
@@ -146,7 +146,7 @@ namespace AktieAnalyzer
                 }
                 else
                 {
-                    MessageBox.Show("Analysis result not found for the selected stock.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                   MessageBox.Show("Analysis result not found for the selected stock.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
