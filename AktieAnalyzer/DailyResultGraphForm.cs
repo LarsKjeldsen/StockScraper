@@ -73,27 +73,33 @@ namespace AktieAnalyzer
                 TextColor = OxyColors.Red
             });
 
-            // Create line series for daily profit/loss
-            var dailyLineSeries = new LineSeries
+            // Create scatter series for daily profit/loss with green and red coloring
+            var dailyProfitSeries = new ScatterSeries
             {
-                Title = "Daily Profit/Loss",
-                Color = OxyColors.Blue,
-                StrokeThickness = 2,
+                Title = "Profit (> 0)",
                 MarkerType = MarkerType.Circle,
                 MarkerSize = 3,
-                MarkerFill = OxyColors.Blue,
-                YAxisKey = "DailyAxis" // Bind to primary Y-axis
+                MarkerFill = OxyColors.Green,
+                YAxisKey = "DailyAxis"
+            };
+            var dailyLossSeries = new ScatterSeries
+            {
+                Title = "Loss (< 0)",
+                MarkerType = MarkerType.Circle,
+                MarkerSize = 3,
+                MarkerFill = OxyColors.Red,
+                YAxisKey = "DailyAxis"
             };
 
             // Create line series for cumulative sum
             var cumulativeLineSeries = new LineSeries
             {
                 Title = "Cumulative Total Value",
-                Color = OxyColors.Red,
+                Color = OxyColors.Blue, // Changed from Red to Blue
                 StrokeThickness = 3,
                 MarkerType = MarkerType.Square,
                 MarkerSize = 3,
-                MarkerFill = OxyColors.Red,
+                MarkerFill = OxyColors.Blue, // Changed from Red to Blue
                 YAxisKey = "CumulativeAxis" // Bind to secondary Y-axis
             };
 
@@ -106,11 +112,17 @@ namespace AktieAnalyzer
             foreach (var dailyResult in sortedResults)
             {
                 var dateValue = DateTimeAxis.ToDouble(dailyResult.Date);
-                
-                // Add daily profit/loss point
-                dailyLineSeries.Points.Add(new DataPoint(
-                    dateValue, 
-                    (double)dailyResult.ProfitOrLoss));
+                var profitOrLoss = (double)dailyResult.ProfitOrLoss;
+
+                if (profitOrLoss > 0)
+                {
+                    dailyProfitSeries.Points.Add(new ScatterPoint(dateValue, profitOrLoss));
+                }
+                else if (profitOrLoss < 0)
+                {
+                    dailyLossSeries.Points.Add(new ScatterPoint(dateValue, profitOrLoss));
+                }
+                // If exactly zero, you can choose to add to either or skip
 
                 // Use the actual end amount from daily result for cumulative value
                 cumulativeLineSeries.Points.Add(new DataPoint(
@@ -118,7 +130,8 @@ namespace AktieAnalyzer
                     (double)dailyResult.EndAmount));
             }
 
-            model.Series.Add(dailyLineSeries);
+            model.Series.Add(dailyProfitSeries);
+            model.Series.Add(dailyLossSeries);
             model.Series.Add(cumulativeLineSeries);
             
             // Configure legend for OxyPlot 2.x
