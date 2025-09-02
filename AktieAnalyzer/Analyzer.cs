@@ -1,17 +1,12 @@
 using StockData.Common;
-using System.Runtime.InteropServices;
 
 namespace AktieAnalyzer
 {
     public class AnalysisResult
     {
-        public string Recommendation { get; set; } = string.Empty;
-        public string Reason { get; set; } = string.Empty;
         public decimal Amount { get; set; } = 0;
         public int NumberOfTransactions { get; set; } = 0; // Added property for number of transactions
-        public decimal TotalKurtage { get; internal set; }
-
-        // Added property to store daily results
+        public decimal TotalCommission { get; internal set; }
         public List<DailyResult> DailyResults { get; set; } = new List<DailyResult>();
     }
 
@@ -19,8 +14,9 @@ namespace AktieAnalyzer
     {
         public DateTime Date { get; set; }
         public decimal ProfitOrLoss { get; set; }
-        public decimal StartAmount { get; set; }
-        public decimal EndAmount { get; set; }
+        public decimal currentAmount { get; set; }
+        public int numStocks { get; set; }
+        public decimal totalCommission { get; internal set; }
     }
 
     public class Analyzer
@@ -40,134 +36,143 @@ namespace AktieAnalyzer
             _startAmount = startAmount;
         }
 
-        public AnalysisResult Analyze()
-        {
-            if (_stockValues.Count < 10)
-            {
-                return new AnalysisResult
-                {
-                    Recommendation = "HOLD",
-                    Reason = "Insufficient data for analysis"
-                };
-            }
-
-            // Simple analysis based on recent price trend
-            var recentValues = _stockValues.OrderByDescending(sv => sv.Timestamp).Take(10).ToList();
-            var earliestPrice = recentValues.Last().Close ?? 0;
-            var latestPrice = recentValues.First().Close ?? 0;
-
-            if (earliestPrice == 0)
-            {
-                return new AnalysisResult
-                {
-                    Recommendation = "HOLD",
-                    Reason = "Unable to determine price trend"
-                };
-            }
-
-            var percentChange = ((latestPrice - earliestPrice) / earliestPrice) * 100;
-
-            if (percentChange > 5)
-            {
-                return new AnalysisResult
-                {
-                    Recommendation = "BUY",
-                    Reason = $"Strong upward trend: {percentChange:F2}% increase over recent period"
-                };
-            }
-            else if (percentChange < -5)
-            {
-                return new AnalysisResult
-                {
-                    Recommendation = "SELL",
-                    Reason = $"Downward trend: {percentChange:F2}% decrease over recent period"
-                };
-            }
-            else
-            {
-                return new AnalysisResult
-                {
-                    Recommendation = "HOLD",
-                    Reason = $"Stable price movement: {percentChange:F2}% change over recent period"
-                };
-            }
-        }
 
         public AnalysisResult AnalyzeBuyAt8SellAt14()
         {
-            // Filter stock values based on the specified time range
-            var filteredStockValues = _stockValues
-                .Where(sv => sv.Timestamp >= DateTime.Now.Subtract(_timeRange))
+            // Filter and group stock values in a single operation for better performance
+            var cutoffDate = DateTime.Now.Subtract(_timeRange);
+            var groupedByDate = _stockValues
+                .Where(sv => sv.Timestamp >= cutoffDate)
+                .GroupBy(sv => sv.Timestamp.Date)
+                .OrderBy(g => g.Key)
                 .ToList();
 
-            // Group stock values by date
-            var groupedByDate = filteredStockValues.GroupBy(sv => sv.Timestamp.Date).ToList();
-
-            // Starting amount
-            var currentAmount = _startAmount;
-            int transactionCount = 0; // Counter for transactions
-            var dailyResults = new List<DailyResult>(); // List to store daily results
-
-            foreach (var group in groupedByDate)
-            {
-                var sellPrice = group
-                    .Where(sv => sv.Timestamp.TimeOfDay >= new TimeSpan(8, 0, 0))
-                    .OrderBy(sv => sv.Timestamp.TimeOfDay)
-                    .FirstOrDefault()?.Open;
-
-                var buyPrice = group
-                    .Where(sv => sv.Timestamp.TimeOfDay >= new TimeSpan(14, 0, 0))
-                    .OrderBy(sv => sv.Timestamp.TimeOfDay)
-                    .FirstOrDefault()?.Close;
-
-                if (buyPrice.HasValue && sellPrice.HasValue)
-                {
-                    var PL = sellPrice.Value - buyPrice.Value;
-                    var newHolding = currentAmount * PL;
-
-                    // Calculate the number of shares bought and their value at sell price
-                    var sharesBought = currentAmount / buyPrice.Value;
-                    var endAmount = sharesBought * sellPrice.Value; // Update current amount after selling
-
-                    dailyResults.Add(new DailyResult
-                    {
-                        Date = group.Key,
-                        ProfitOrLoss = endAmount - currentAmount,
-                        StartAmount = currentAmount,
-                        EndAmount = endAmount
-                    });
-
-                    currentAmount = endAmount;
-                    transactionCount += 2; // Increment transaction count (one sell and one buy)
-                }
-            }
-
-            if (transactionCount == 0)
+            if (!groupedByDate.Any())
             {
                 return new AnalysisResult
                 {
-                    Recommendation = "HOLD",
-                    Reason = "No sufficient data for 8:00 and 14:00 analysis",
-                    NumberOfTransactions = transactionCount, // Include transaction count
-                    DailyResults = dailyResults
+                    NumberOfTransactions = 0,
+                    DailyResults = new List<DailyResult>(),
+                };
+            }
+
+            // Define time spans once for reuse
+            var buyTime7AM = new TimeSpan(7, 0, 0);
+            var sellTime8AM = new TimeSpan(8, 0, 0);
+            var buyTime2PM = new TimeSpan(14, 0, 0);
+            var finalSellTime3PM = new TimeSpan(15, 0, 0);
+
+            var currentAmount = _startAmount;
+            var transactionCount = 0;
+            var dailyResults = new List<DailyResult>();
+            var numStocks = 0;
+            decimal TotalCommission = 0;
+            decimal? lastSellPrice = 0;
+
+            // Initial stock purchase at 8:00 AM on the first day (sellTime8AM)
+            var firstDay = groupedByDate.First();
+            var initialBuyPrice = GetPriceAtTime(firstDay, sellTime8AM, true); // Use Open price
+
+            if (!initialBuyPrice.HasValue)
+            {
+                return new AnalysisResult
+                {
+                    NumberOfTransactions = 0,
+                    DailyResults = new List<DailyResult>(),
+                };
+            }
+
+            numStocks = (int)(currentAmount / initialBuyPrice.Value);
+            var cashAfterInitialPurchase = currentAmount - (numStocks * initialBuyPrice.Value);
+            transactionCount = 1; // Initial buy transaction
+
+            // Process trading days (skip first day since we already bought)
+            for (int i = 1; i < groupedByDate.Count; i++)
+            {
+                var dayGroup = groupedByDate[i];
+
+                var sellPrice = GetPriceAtTime(dayGroup, sellTime8AM, true); // Use Open price for sell
+                var buyPrice = GetPriceAtTime(dayGroup, buyTime2PM, false); // Use Close price for buy
+
+                lastSellPrice = sellPrice;
+
+                if (sellPrice.HasValue && buyPrice.HasValue && numStocks > 0)
+                {
+                    // Sell all stocks at 8:00 AM
+                    cashAfterInitialPurchase += numStocks * sellPrice.Value;
+                    numStocks = 0;
+                    transactionCount++;
+                    var midDay = cashAfterInitialPurchase;
+                    // Buy stocks at 2:00 PM
+                    numStocks = (int)(cashAfterInitialPurchase / buyPrice.Value);
+                    cashAfterInitialPurchase -= numStocks * buyPrice.Value;
+                    transactionCount++;
+
+                    // Calculate current total value for daily result
+
+                    decimal dailyCommission = Math.Max(0.0005m * midDay, 25m) * 2; // Buy and sell commission
+                    TotalCommission += dailyCommission;
+
+                    dailyResults.Add(new DailyResult
+                    {
+                        Date = dayGroup.Key,
+                        ProfitOrLoss = midDay - _startAmount,
+                        currentAmount = midDay,
+                        numStocks = numStocks,
+                        totalCommission = dailyCommission
+                    });
+                }
+            }
+
+            // Final sale at 3:00 PM on the last day
+            if (lastSellPrice.HasValue && numStocks > 0)
+            {
+                cashAfterInitialPurchase += numStocks * lastSellPrice.Value;
+                numStocks = 0;
+                transactionCount++;
+            }
+
+            currentAmount = cashAfterInitialPurchase;
+
+            if (transactionCount <= 1) // Only initial purchase, no trading occurred
+            {
+                return new AnalysisResult
+                {
+                    NumberOfTransactions = transactionCount,
+                    DailyResults = dailyResults,
                 };
             }
 
             var totalProfit = currentAmount - _startAmount;
 
-            // Kurtage is 25 DKK / transaction + 0.05% of the transaction value
-            var kurtagePerTransaction = 25 + (0.0005m * _startAmount);
-            var totalKurtage = kurtagePerTransaction * transactionCount * 2; // Buy and sell for each transaction
+            // Calculate commission : Max ( 25 DKK per transaction and 0.05% of transaction value)
+            var avgTransactionValue = _startAmount; // Simplified approximation
+            TotalCommission += Math.Max(0.0005m * avgTransactionValue, 25m);
 
             return new AnalysisResult
             {
-                Recommendation = totalProfit > 0 ? "Win" : "Loss",
-                Reason = $"Total profit: {totalProfit:F2}, Final amount: {currentAmount:F2}",
-                Amount = totalProfit, // Final profit in dollars
-                NumberOfTransactions = transactionCount, // Include transaction count
-                TotalKurtage = totalKurtage, // Include total kurtage cost
-                DailyResults = dailyResults // Include daily results
+                Amount = totalProfit - TotalCommission, // Net profit after commission
+                NumberOfTransactions = transactionCount,
+                TotalCommission = TotalCommission,
+                DailyResults = dailyResults
             };
+        }
+
+        /// <summary>
+        /// Helper method to get stock price at a specific time of day
+        /// </summary>
+        /// <param name="dayGroup">Stock values for a specific day</param>
+        /// <param name="targetTime">Target time to find price for</param>
+        /// <param name="useOpenPrice">True to use Open price, false to use Close price</param>
+        /// <returns>The stock price at the specified time, or null if not found</returns>
+        private static decimal? GetPriceAtTime(IGrouping<DateTime, StockValue> dayGroup, TimeSpan targetTime, bool useOpenPrice)
+        {
+            var stockValue = dayGroup
+                .Where(sv => sv.Timestamp.TimeOfDay >= targetTime)
+                .OrderBy(sv => sv.Timestamp.TimeOfDay)
+                .FirstOrDefault();
+
+            return useOpenPrice ? stockValue?.Open : stockValue?.Close;
         }
     }
 }

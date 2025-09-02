@@ -105,8 +105,8 @@ namespace AktieAnalyzer
 
             // Sort daily results by date to ensure proper cumulative calculation
             var sortedResults = dailyResults.OrderBy(dr => dr.Date).ToList();
-            
-            decimal cumulativeValue = sortedResults.FirstOrDefault()?.StartAmount ?? 10000; // Use the actual start amount
+
+            decimal cumulativeValue = sortedResults.FirstOrDefault()?.currentAmount ?? 10000; // Use the actual start amount
 
             // Add data points
             foreach (var dailyResult in sortedResults)
@@ -127,7 +127,7 @@ namespace AktieAnalyzer
                 // Use the actual end amount from daily result for cumulative value
                 cumulativeLineSeries.Points.Add(new DataPoint(
                     dateValue,
-                    (double)dailyResult.EndAmount));
+                    (double)dailyResult.currentAmount));
             }
 
             model.Series.Add(dailyProfitSeries);

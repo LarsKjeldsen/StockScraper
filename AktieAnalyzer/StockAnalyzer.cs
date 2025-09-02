@@ -25,10 +25,9 @@ namespace AktieAnalyzer
             // Add columns to the ListView
             listViewResults.Columns.Add("Stock Code", 100, HorizontalAlignment.Left);
             listViewResults.Columns.Add("Friendly Name", 150, HorizontalAlignment.Left);
-            listViewResults.Columns.Add("Amount", 80, HorizontalAlignment.Right);
+            listViewResults.Columns.Add("EndAmount", 80, HorizontalAlignment.Right);
             listViewResults.Columns.Add("Transactions", 100, HorizontalAlignment.Right); // Added column for number of transactions
-            listViewResults.Columns.Add("Recommendation", 120, HorizontalAlignment.Left);
-            listViewResults.Columns.Add("Reason", 200, HorizontalAlignment.Left);
+            listViewResults.Columns.Add("EndStocks", 120, HorizontalAlignment.Left);
         }
 
         private void InitializeDailyResultsListView()
@@ -70,7 +69,7 @@ namespace AktieAnalyzer
             textBoxStartAmount.Text = startAmount.ToString("N0");
 
             decimal totalAmount = startAmount;
-            decimal totalKurtage = 0.00m;
+            decimal totalCommission = 0.00m;
 
             // Read all stock values for all stocks into memory
             var stocks = await Helper.GetStocksFromDatabase();
@@ -100,18 +99,16 @@ namespace AktieAnalyzer
                         stock.FriendlyName,
                         analysisResult.Amount.ToString("N0"), // Display amount as decimal with thousand separators
                         analysisResult.NumberOfTransactions.ToString("N0"), // Display number of transactions as integer with thousand separators
-                        analysisResult.Recommendation,
-                        analysisResult.Reason
                     });
                     totalAmount += analysisResult.Amount;
-                    totalKurtage += analysisResult.TotalKurtage;
+                    totalCommission += analysisResult.TotalCommission;
                     listViewResults.Items.Add(listViewItem);
                 }
 
                 // Update summary fields
                 textBoxEndAmount.Text = totalAmount.ToString("N0"); // Display total amount as decimal with thousand separators
                 textBoxPL.Text = (totalAmount - startAmount).ToString("N0"); // Display profit/loss as decimal with thousand separators
-                textBoxKurtage.Text = totalKurtage.ToString("N0"); // Display kurtage as decimal with thousand separators
+                textBoxCommission.Text = totalCommission.ToString("N0"); // Display commission as decimal with thousand separators
             }
         }
 
@@ -122,8 +119,8 @@ namespace AktieAnalyzer
                 var listViewItem = new ListViewItem(new[]
                 {
                     dailyResult.Date.ToShortDateString(),
-                    dailyResult.StartAmount.ToString("N0"),
-                    dailyResult.EndAmount.ToString("N0"),
+                    dailyResult.currentAmount.ToString("N0"),
+                    dailyResult.numStocks.ToString("N0"),
                     dailyResult.ProfitOrLoss.ToString("N0")
                 });
                 listViewDailyResults.Items.Add(listViewItem);

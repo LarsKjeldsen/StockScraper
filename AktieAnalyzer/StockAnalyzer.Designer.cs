@@ -33,7 +33,7 @@
             textBoxStartAmount = new TextBox();
             textBoxEndAmount = new TextBox();
             textBoxPL = new TextBox();
-            textBoxKurtage = new TextBox();
+            textBoxCommission = new TextBox();
             label1 = new Label();
             label2 = new Label();
             label3 = new Label();
@@ -83,12 +83,12 @@
             textBoxPL.Size = new Size(100, 23);
             textBoxPL.TabIndex = 4;
             // 
-            // textBoxKurtage
+            // textBoxCommission
             // 
-            textBoxKurtage.Location = new Point(877, 99);
-            textBoxKurtage.Name = "textBoxKurtage";
-            textBoxKurtage.Size = new Size(100, 23);
-            textBoxKurtage.TabIndex = 5;
+            textBoxCommission.Location = new Point(877, 99);
+            textBoxCommission.Name = "textBoxCommission";
+            textBoxCommission.Size = new Size(100, 23);
+            textBoxCommission.TabIndex = 5;
             // 
             // label1
             // 
@@ -122,9 +122,9 @@
             label4.AutoSize = true;
             label4.Location = new Point(791, 107);
             label4.Name = "label4";
-            label4.Size = new Size(48, 15);
+            label4.Size = new Size(71, 15);
             label4.TabIndex = 9;
-            label4.Text = "Kurtage";
+            label4.Text = "Commission";
             // 
             // StockAnalyzer
             // 
@@ -135,7 +135,7 @@
             Controls.Add(label3);
             Controls.Add(label2);
             Controls.Add(label1);
-            Controls.Add(textBoxKurtage);
+            Controls.Add(textBoxCommission);
             Controls.Add(textBoxPL);
             Controls.Add(textBoxEndAmount);
             Controls.Add(textBoxStartAmount);
@@ -159,7 +159,7 @@
         private TextBox textBoxStartAmount;
         private TextBox textBoxEndAmount;
         private TextBox textBoxPL;
-        private TextBox textBoxKurtage;
+        private TextBox textBoxCommission;
         private Label label1;
         private Label label2;
         private Label label3;
