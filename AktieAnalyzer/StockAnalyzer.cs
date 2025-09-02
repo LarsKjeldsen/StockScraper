@@ -66,6 +66,24 @@ namespace AktieAnalyzer
                 return;
             }
 
+            // Parse commission values from textboxes
+            if (!decimal.TryParse(textBoxCommissionPrTrans.Text, out decimal commissionPerTransaction))
+            {
+                MessageBox.Show("Invalid commission per transaction. Please enter a valid number.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            // Parse commission percentage (handle % symbol)
+            var commissionPercentText = textBoxCommissionProcent.Text.Replace("%", "").Replace(",", ".");
+            if (!decimal.TryParse(commissionPercentText, out decimal commissionPercentValue))
+            {
+                MessageBox.Show("Invalid commission percentage. Please enter a valid number.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            
+            // Convert percentage to decimal (e.g., 0.3% becomes 0.003)
+            decimal commissionPercentage = commissionPercentValue / 100m;
+
             textBoxStartAmount.Text = startAmount.ToString("N0");
 
             decimal totalAmount = startAmount;
@@ -78,8 +96,10 @@ namespace AktieAnalyzer
             {
                 if (stock.StockCode == @"^OMXC25")
                     continue;
+                //                if (stock.StockCode != @"MAERSK-B.CO")
+                //                    continue;
                 if (stock.StockCode != @"VWS.CO")
-                    continue;
+                    ; // continue;
 
                 var stockValues = await Helper.GetAllStockValuesFromDatabase(stock.StockCode);
 
@@ -88,7 +108,7 @@ namespace AktieAnalyzer
                     // Specify the time range for analysis (e.g., last 1 year)
                     var timeRange = TimeSpan.FromDays(365);
 
-                    var analyzer = new Analyzer(stock.StockCode, stock.FriendlyName, stockValues, timeRange, startAmount);
+                    var analyzer = new Analyzer(stock.StockCode, stock.FriendlyName, stockValues, timeRange, startAmount, commissionPercentage, commissionPerTransaction);
                     var analysisResult = analyzer.AnalyzeBuyAt8SellAt14(checkBoxCommission.Checked);
 
                     // Store the analysis result for later use
@@ -103,7 +123,7 @@ namespace AktieAnalyzer
                         analysisResult.NumberOfTransactions.ToString("N0"), // Display number of transactions as integer with thousand separators
                     });
                     totalAmount = analysisResult.Amount;
-                    totalCommission = analysisResult.TotalCommission;
+                    totalCommission += analysisResult.TotalCommission;
                     listViewResults.Items.Add(listViewItem);
                 }
 

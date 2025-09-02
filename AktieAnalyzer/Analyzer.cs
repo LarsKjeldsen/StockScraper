@@ -26,154 +26,180 @@ namespace AktieAnalyzer
         private readonly List<StockValue> _stockValues;
         private readonly TimeSpan _timeRange;
         private readonly decimal _startAmount;
+        private readonly decimal _commissionPercentage;
+        private readonly decimal _commissionPerTransaction;
 
-        public Analyzer(string stockCode, string friendlyName, List<StockValue> stockValues, TimeSpan timeRange, decimal startAmount)
+        // Trading times
+        private static readonly TimeSpan SellTime = new(8, 0, 0);
+        private static readonly TimeSpan BuyTime = new(14, 0, 0);
+
+        public Analyzer(string stockCode, string friendlyName, List<StockValue> stockValues, TimeSpan timeRange, decimal startAmount, decimal commissionPercentage = 0.0005m, decimal commissionPerTransaction = 25m)
         {
             _stockCode = stockCode;
             _friendlyName = friendlyName;
             _stockValues = stockValues;
             _timeRange = timeRange;
             _startAmount = startAmount;
+            _commissionPercentage = commissionPercentage;
+            _commissionPerTransaction = commissionPerTransaction;
         }
-
 
         public AnalysisResult AnalyzeBuyAt8SellAt14(bool includeCommission)
         {
-            // Filter and group stock values in a single operation for better performance
+            var dailyGroups = GetTradingDays();
+            var portfolio = InitializePortfolio(dailyGroups.First());
+
+            if (portfolio == null || !dailyGroups.Any())
+            {
+                return CreateEmptyResult();
+            }
+
+            var dailyResults = ProcessTradingDays(dailyGroups.Skip(1), portfolio);
+            FinalizePortfolio(portfolio);
+
+            return CreateFinalResult(portfolio, dailyResults, includeCommission);
+        }
+
+
+        // ***************** Helper routines *********************
+
+
+        private List<DailyResult> ProcessTradingDays(IEnumerable<IGrouping<DateTime, StockValue>> tradingDays, TradingPortfolio portfolio)
+        {
+            var dailyResults = new List<DailyResult>();
+
+            foreach (var day in tradingDays)
+            {
+                var sellPrice = GetPriceAtTime(day, SellTime, useOpenPrice: true);
+                var buyPrice = GetPriceAtTime(day, BuyTime, useOpenPrice: false);
+
+                portfolio.LastSellPrice = sellPrice;
+
+                if (sellPrice.HasValue && buyPrice.HasValue && portfolio.Shares > 0)
+                {
+                    var dailyResult = ExecuteDayTrade(day, sellPrice.Value, buyPrice.Value, portfolio);
+                    dailyResults.Add(dailyResult);
+                }
+            }
+
+            return dailyResults;
+        }
+
+        private DailyResult ExecuteDayTrade(IGrouping<DateTime, StockValue> day, decimal sellPrice, decimal buyPrice, TradingPortfolio portfolio)
+        {
+            // Sell all shares 
+            var sellAmount = portfolio.Shares * sellPrice;
+            portfolio.Cash += sellAmount;
+            portfolio.Shares = 0;
+            portfolio.TransactionCount++;
+
+            // Buy shares for all Cash
+            portfolio.Shares = (int)(portfolio.Cash / buyPrice);
+            var buyAmount = portfolio.Shares * buyPrice;
+            portfolio.Cash -= buyAmount;
+            portfolio.TransactionCount++;
+
+            // Calculate commission for both transactions
+            var dailyCommission = CalculateCommission(sellAmount) + CalculateCommission(buyAmount);
+            portfolio.TotalCommission += dailyCommission;
+
+            return new DailyResult
+            {
+                Date = day.Key,
+                ProfitOrLoss = sellAmount - buyAmount,
+                currentAmount = portfolio.Cash,
+                numStocks = portfolio.Shares,
+                totalCommission = dailyCommission
+            };
+        }
+
+        private void FinalizePortfolio(TradingPortfolio portfolio)
+        {
+            // Final liquidation using last known sell price if still holding shares
+            if (portfolio.LastSellPrice.HasValue && portfolio.Shares > 0)
+            {
+                var finalSellAmount = portfolio.Shares * portfolio.LastSellPrice.Value;
+                portfolio.Cash += finalSellAmount;
+                portfolio.Shares = 0;
+                portfolio.TransactionCount++;
+                portfolio.TotalCommission += CalculateCommission(finalSellAmount);
+            }
+        }
+
+        private List<IGrouping<DateTime, StockValue>> GetTradingDays()
+        {
             var cutoffDate = DateTime.Now.Subtract(_timeRange);
-            var groupedByDate = _stockValues
+            return _stockValues
                 .Where(sv => sv.Timestamp >= cutoffDate)
                 .GroupBy(sv => sv.Timestamp.Date)
                 .OrderBy(g => g.Key)
                 .ToList();
+        }
 
-            if (!groupedByDate.Any())
+        private AnalysisResult CreateEmptyResult()
+        {
+            return new AnalysisResult
             {
-                return new AnalysisResult
-                {
-                    NumberOfTransactions = 0,
-                    DailyResults = new List<DailyResult>(),
-                };
-            }
+                NumberOfTransactions = 0,
+                DailyResults = new List<DailyResult>(),
+            };
+        }
 
-            // Define time spans once for reuse
-            var buyTime7AM = new TimeSpan(7, 0, 0);
-            var sellTime8AM = new TimeSpan(8, 0, 0);
-            var buyTime2PM = new TimeSpan(14, 0, 0);
-            var finalSellTime3PM = new TimeSpan(15, 0, 0);
-
-            var currentAmount = _startAmount;
-            var transactionCount = 0;
-            var dailyResults = new List<DailyResult>();
-            var numStocks = 0;
-            decimal TotalCommission = 0;
-            decimal? lastSellPrice = 0;
-            var amount = 0m;
-
-            // Initial stock purchase at 8:00 AM on the first day (sellTime8AM)
-            var firstDay = groupedByDate.First();
-            var initialBuyPrice = GetPriceAtTime(firstDay, sellTime8AM, true); // Use Open price
-
+        private TradingPortfolio? InitializePortfolio(IGrouping<DateTime, StockValue> firstDay)
+        {
+            var initialBuyPrice = GetPriceAtTime(firstDay, SellTime, useOpenPrice: true);
             if (!initialBuyPrice.HasValue)
             {
-                return new AnalysisResult
-                {
-                    NumberOfTransactions = 0,
-                    DailyResults = new List<DailyResult>(),
-                };
+                return null;
             }
 
-            numStocks = (int)(currentAmount / initialBuyPrice.Value);
-            var cashAfterInitialPurchase = currentAmount - (numStocks * initialBuyPrice.Value);
-            transactionCount = 1; // Initial buy transaction
+            var shares = (int)(_startAmount / initialBuyPrice.Value);
+            var cash = _startAmount - (shares * initialBuyPrice.Value);
 
-            // Process trading days (skip first day since we already bought)
-            for (int i = 1; i < groupedByDate.Count; i++)
+            return new TradingPortfolio
             {
-                var dayGroup = groupedByDate[i];
+                Cash = cash,
+                Shares = shares,
+                TransactionCount = 1,
+                TotalCommission = 0m,
+                LastSellPrice = null
+            };
+        }
 
-                var sellPrice = GetPriceAtTime(dayGroup, sellTime8AM, true); // Use Open price for sell
-                var buyPrice = GetPriceAtTime(dayGroup, buyTime2PM, false); // Use Close price for buy
-
-                lastSellPrice = sellPrice;
-
-                if (sellPrice.HasValue && buyPrice.HasValue && numStocks > 0)
-                {
-                    // Sell all stocks at 8:00 AM
-                    cashAfterInitialPurchase += numStocks * sellPrice.Value;
-                    numStocks = 0;
-                    transactionCount++;
-                    var midDay = cashAfterInitialPurchase;
-
-                    // Buy stocks at 2:00 PM
-                    numStocks = (int)(cashAfterInitialPurchase / buyPrice.Value);
-                    cashAfterInitialPurchase -= numStocks * buyPrice.Value;
-                    transactionCount++;
-
-                    // Calculate current total value for daily result
-
-                    decimal dailyCommission = Math.Max(0.0005m * midDay, 25m) * 2; // Buy and sell commission
-                    TotalCommission += dailyCommission;
-
-                    dailyResults.Add(new DailyResult
-                    {
-                        Date = dayGroup.Key,
-                        ProfitOrLoss = midDay - _startAmount,
-                        currentAmount = midDay,
-                        numStocks = numStocks,
-                        totalCommission = dailyCommission
-                    });
-                }
-            }
-
-            // Final sale at 3:00 PM on the last day
-            if (lastSellPrice.HasValue && numStocks > 0)
-            {
-                cashAfterInitialPurchase += numStocks * lastSellPrice.Value;
-                numStocks = 0;
-                transactionCount++;
-            }
-
-            currentAmount = cashAfterInitialPurchase;
-
-            if (transactionCount <= 1) // Only initial purchase, no trading occurred
+        private AnalysisResult CreateFinalResult(TradingPortfolio portfolio, List<DailyResult> dailyResults, bool includeCommission)
+        {
+            if (portfolio.TransactionCount <= 1)
             {
                 return new AnalysisResult
                 {
-                    NumberOfTransactions = transactionCount,
+                    NumberOfTransactions = portfolio.TransactionCount,
                     DailyResults = dailyResults,
                 };
             }
 
-            var totalProfit = currentAmount - _startAmount;
-
-            // Calculate commission : Max ( 25 DKK per transaction and 0.05% of transaction value)
-            var avgTransactionValue = _startAmount; // Simplified approximation
-            TotalCommission += Math.Max(0.0005m * avgTransactionValue, 25m);
-
-            // if includeCommission is true then Amount = totalProfit else Amount = totalProfit - TotalCommission
-
-            if (includeCommission)
-                amount += currentAmount - TotalCommission; 
-            else
-                amount += currentAmount;
+            var finalAmount = includeCommission
+                ? portfolio.Cash - portfolio.TotalCommission
+                : portfolio.Cash;
 
             return new AnalysisResult
             {
-                Amount = amount,
-                NumberOfTransactions = transactionCount,
-                TotalCommission = TotalCommission,
+                Amount = finalAmount,
+                NumberOfTransactions = portfolio.TransactionCount,
+                TotalCommission = portfolio.TotalCommission,
                 DailyResults = dailyResults
             };
         }
 
-        /// <summary>
-        /// Helper method to get stock price at a specific time of day
-        /// </summary>
-        /// <param name="dayGroup">Stock values for a specific day</param>
-        /// <param name="targetTime">Target time to find price for</param>
-        /// <param name="useOpenPrice">True to use Open price, false to use Close price</param>
-        /// <returns>The stock price at the specified time, or null if not found</returns>
+        private decimal CalculateCommission(decimal transactionValue)
+        {
+            var r = (_commissionPercentage / 100) * transactionValue;
+            if (r < _commissionPerTransaction)
+                return _commissionPerTransaction;
+            else 
+                return r;
+        }
+
+        
         private static decimal? GetPriceAtTime(IGrouping<DateTime, StockValue> dayGroup, TimeSpan targetTime, bool useOpenPrice)
         {
             var stockValue = dayGroup
@@ -182,6 +208,15 @@ namespace AktieAnalyzer
                 .FirstOrDefault();
 
             return useOpenPrice ? stockValue?.Open : stockValue?.Close;
+        }
+
+        private class TradingPortfolio
+        {
+            public decimal Cash { get; set; }
+            public int Shares { get; set; }
+            public int TransactionCount { get; set; }
+            public decimal TotalCommission { get; set; }
+            public decimal? LastSellPrice { get; set; }
         }
     }
 }
