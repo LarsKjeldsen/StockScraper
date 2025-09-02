@@ -38,6 +38,7 @@
             label2 = new Label();
             label3 = new Label();
             label4 = new Label();
+            checkBoxCommission = new CheckBox();
             SuspendLayout();
             // 
             // listViewResults
@@ -122,15 +123,26 @@
             label4.AutoSize = true;
             label4.Location = new Point(791, 107);
             label4.Name = "label4";
-            label4.Size = new Size(71, 15);
+            label4.Size = new Size(74, 15);
             label4.TabIndex = 9;
             label4.Text = "Commission";
+            // 
+            // checkBoxCommission
+            // 
+            checkBoxCommission.AutoSize = true;
+            checkBoxCommission.Location = new Point(672, 20);
+            checkBoxCommission.Name = "checkBoxCommission";
+            checkBoxCommission.Size = new Size(93, 19);
+            checkBoxCommission.TabIndex = 11;
+            checkBoxCommission.Text = "Commission";
+            checkBoxCommission.UseVisualStyleBackColor = true;
             // 
             // StockAnalyzer
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(999, 596);
+            Controls.Add(checkBoxCommission);
             Controls.Add(label4);
             Controls.Add(label3);
             Controls.Add(label2);
@@ -164,5 +176,6 @@
         private Label label2;
         private Label label3;
         private Label label4;
+        private CheckBox checkBoxCommission;
     }
 }

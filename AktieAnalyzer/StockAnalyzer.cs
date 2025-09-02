@@ -78,6 +78,8 @@ namespace AktieAnalyzer
             {
                 if (stock.StockCode == @"^OMXC25")
                     continue;
+                if (stock.StockCode != @"VWS.CO")
+                    continue;
 
                 var stockValues = await Helper.GetAllStockValuesFromDatabase(stock.StockCode);
 
@@ -87,7 +89,7 @@ namespace AktieAnalyzer
                     var timeRange = TimeSpan.FromDays(365);
 
                     var analyzer = new Analyzer(stock.StockCode, stock.FriendlyName, stockValues, timeRange, startAmount);
-                    var analysisResult = analyzer.AnalyzeBuyAt8SellAt14();
+                    var analysisResult = analyzer.AnalyzeBuyAt8SellAt14(checkBoxCommission.Checked);
 
                     // Store the analysis result for later use
                     analysisResults[stock.StockCode] = analysisResult;
@@ -100,14 +102,15 @@ namespace AktieAnalyzer
                         analysisResult.Amount.ToString("N0"), // Display amount as decimal with thousand separators
                         analysisResult.NumberOfTransactions.ToString("N0"), // Display number of transactions as integer with thousand separators
                     });
-                    totalAmount += analysisResult.Amount;
-                    totalCommission += analysisResult.TotalCommission;
+                    totalAmount = analysisResult.Amount;
+                    totalCommission = analysisResult.TotalCommission;
                     listViewResults.Items.Add(listViewItem);
                 }
 
                 // Update summary fields
                 textBoxEndAmount.Text = totalAmount.ToString("N0"); // Display total amount as decimal with thousand separators
-                textBoxPL.Text = (totalAmount - startAmount).ToString("N0"); // Display profit/loss as decimal with thousand separators
+                var profitLossPercentage = ((totalAmount - startAmount) / startAmount) * 100;
+                textBoxPL.Text = profitLossPercentage.ToString("N2") + "%"; // Display profit/loss as percentage with 2 decimal places
                 textBoxCommission.Text = totalCommission.ToString("N0"); // Display commission as decimal with thousand separators
             }
         }

@@ -37,7 +37,7 @@ namespace AktieAnalyzer
         }
 
 
-        public AnalysisResult AnalyzeBuyAt8SellAt14()
+        public AnalysisResult AnalyzeBuyAt8SellAt14(bool includeCommission)
         {
             // Filter and group stock values in a single operation for better performance
             var cutoffDate = DateTime.Now.Subtract(_timeRange);
@@ -68,6 +68,7 @@ namespace AktieAnalyzer
             var numStocks = 0;
             decimal TotalCommission = 0;
             decimal? lastSellPrice = 0;
+            var amount = 0m;
 
             // Initial stock purchase at 8:00 AM on the first day (sellTime8AM)
             var firstDay = groupedByDate.First();
@@ -103,6 +104,7 @@ namespace AktieAnalyzer
                     numStocks = 0;
                     transactionCount++;
                     var midDay = cashAfterInitialPurchase;
+
                     // Buy stocks at 2:00 PM
                     numStocks = (int)(cashAfterInitialPurchase / buyPrice.Value);
                     cashAfterInitialPurchase -= numStocks * buyPrice.Value;
@@ -149,9 +151,16 @@ namespace AktieAnalyzer
             var avgTransactionValue = _startAmount; // Simplified approximation
             TotalCommission += Math.Max(0.0005m * avgTransactionValue, 25m);
 
+            // if includeCommission is true then Amount = totalProfit else Amount = totalProfit - TotalCommission
+
+            if (includeCommission)
+                amount += currentAmount - TotalCommission; 
+            else
+                amount += currentAmount;
+
             return new AnalysisResult
             {
-                Amount = totalProfit - TotalCommission, // Net profit after commission
+                Amount = amount,
                 NumberOfTransactions = transactionCount,
                 TotalCommission = TotalCommission,
                 DailyResults = dailyResults
